@@ -84,7 +84,7 @@ def main():
     hand_tracker = HandTracker()
     simulator = DroneSimulator()
     voice_processor = VoiceProcessor()
-    llm = LLMInterface("AIzaSyDuy2BHUdsVdg0R_Zrj7lvHx6p7JJe7hNU")
+    llm = LLMInterface("API DAALDI GALTI SE HAHAHA")
     
     # Start with camera 0
     current_camera_index = 0
