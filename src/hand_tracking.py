@@ -21,13 +21,29 @@ class HandTracker:
         left_hand_gesture = None
         right_hand_gesture = None
         
+        # Define colors for each hand (BGR format)
+        red_color = (0, 0, 255)  # Red for left drone (BGR)
+        blue_color = (255, 0, 0)  # Blue for right drone (BGR)
+        
         if results.multi_hand_landmarks:
             for idx, hand_landmarks in enumerate(results.multi_hand_landmarks):
-                # Draw landmarks on frame
-                self.mp_draw.draw_landmarks(frame, hand_landmarks, self.mp_hands.HAND_CONNECTIONS)
-                
                 # Get hand type (left or right)
                 handedness = results.multi_handedness[idx].classification[0].label
+                
+                # Set color based on handedness (camera shows mirror image)
+                # "Right" in camera is actually left hand (controls red drone)
+                # "Left" in camera is actually right hand (controls blue drone)
+                landmark_color = red_color if handedness == "Right" else blue_color
+                
+                # Draw landmarks with custom color
+                drawing_spec = self.mp_draw.DrawingSpec(color=landmark_color, thickness=2, circle_radius=2)
+                self.mp_draw.draw_landmarks(
+                    frame, 
+                    hand_landmarks, 
+                    self.mp_hands.HAND_CONNECTIONS,
+                    landmark_drawing_spec=drawing_spec,
+                    connection_drawing_spec=drawing_spec
+                )
                 
                 gesture = self._classify_gesture(hand_landmarks)
                 
@@ -58,16 +74,39 @@ class HandTracker:
         middle_base = points[9]  # Middle base
         palm_center = points[9]  # Palm center
         
+        # Get handedness (true for right hand, false for left hand)
+        is_right_hand = points[4][0] < points[17][0]  # Thumb tip is left of pinky base for right hand
+        
         # Check if hand is closed (fist) - STOP
         if self._is_fist(points):
             return "STOP"
         
-        # Check if both thumb and pinky are extended (and other fingers down) - CIRCLE
+        # Check for FORWARD - both thumb and index extended, others closed
         if (self._is_thumb_extended(thumb_tip, thumb_base) and
-            self._is_finger_raised(pinky_tip, points[17]) and
+            self._is_finger_raised(index_tip, index_base) and
+            not self._is_finger_raised(middle_tip, middle_base) and
+            not self._is_finger_raised(pinky_tip, points[17])):
+            return "FORWARD"
+        
+        # Check for CIRCLE - both thumb and pinky extended, others closed
+        if (self._is_thumb_extended(thumb_tip, thumb_base) and
+            (self._is_finger_raised(pinky_tip, points[17]) or self._is_finger_lowered(pinky_tip, points[17])) and
             not self._is_finger_raised(index_tip, index_base) and
             not self._is_finger_raised(middle_tip, middle_base)):
             return "CIRCLE"
+        
+        # Check for LEFT/RIGHT with thumb only
+        if (self._is_thumb_extended(thumb_tip, thumb_base) and
+            not self._is_finger_raised(index_tip, index_base) and
+            not self._is_finger_raised(middle_tip, middle_base) and
+            not self._is_finger_raised(pinky_tip, points[17])):
+            # For right hand in camera (red drone): thumb pointing left means RIGHT
+            # For left hand in camera (blue drone): thumb pointing left means LEFT
+            thumb_points_left = thumb_tip[0] < thumb_base[0]
+            if is_right_hand:
+                return "RIGHT" if thumb_points_left else "LEFT"  # Red drone: left thumb = RIGHT
+            else:
+                return "RIGHT" if thumb_points_left else "LEFT"  # Blue drone: left thumb = LEFT
         
         # Check if only index finger is up - UP
         if (self._is_finger_raised(index_tip, index_base) and 
@@ -83,31 +122,19 @@ class HandTracker:
             not self._is_thumb_extended(thumb_tip, thumb_base)):
             return "DOWN"
         
-        # Get handedness from landmarks (assuming thumb points left for right hand)
-        is_right_hand = points[4][0] < points[17][0]  # Thumb is left of pinky base
-        
-        # Check if only thumb is extended
-        if (self._is_thumb_extended(thumb_tip, thumb_base) and
-            not self._is_finger_raised(index_tip, index_base) and
-            not self._is_finger_raised(middle_tip, middle_base) and
-            not self._is_finger_raised(pinky_tip, points[17])):
-            return "LEFT" if not is_right_hand else "RIGHT"  # Inverted logic
-        
         # Check if only pinky is raised
         if (self._is_finger_raised(pinky_tip, points[17]) and
             not self._is_finger_raised(index_tip, index_base) and
-            not self._is_finger_raised(middle_tip, middle_base)):
-            return "RIGHT" if not is_right_hand else "LEFT"  # Inverted logic
+            not self._is_finger_raised(middle_tip, middle_base) and
+            not self._is_thumb_extended(thumb_tip, thumb_base)):
+            return "RIGHT" if not is_right_hand else "LEFT"  # Right hand pinky = LEFT, Left hand pinky = RIGHT
         
-        # Check if thumb and index are touching - BACKWARD
+        # Check for BACKWARD - thumb and index finger pinch
         if self._are_fingers_touching(thumb_tip, index_tip):
-            return "BACKWARD"
-        
-        # Check if thumb and index form L shape - FORWARD
-        if (self._is_thumb_extended(thumb_tip, thumb_base) and
-            self._is_finger_raised(index_tip, index_base) and
-            not self._is_finger_raised(middle_tip, middle_base)):
-            return "FORWARD"
+            # Make sure other fingers are down
+            if (not self._is_finger_raised(middle_tip, middle_base) and
+                not self._is_finger_raised(pinky_tip, points[17])):
+                return "BACKWARD"
         
         return None
 
@@ -122,10 +149,16 @@ class HandTracker:
         """Check if a finger is raised by comparing y coordinates"""
         return tip[1] < base[1] - threshold
     
+    def _is_finger_lowered(self, tip, base, threshold=0.1):
+        """Check if a finger is lowered (for palm backward gestures)"""
+        return tip[1] > base[1] + threshold
+    
     def _is_thumb_extended(self, thumb_tip, thumb_base, threshold=0.1):
-        """Check if thumb is extended laterally"""
+        """Simple check if thumb is extended laterally"""
         return abs(thumb_tip[0] - thumb_base[0]) > threshold
     
-    def _are_fingers_touching(self, tip1, tip2, threshold=0.05):
+    def _are_fingers_touching(self, tip1, tip2, threshold=0.08):
         """Check if two finger tips are touching"""
-        return np.linalg.norm(tip1 - tip2) < threshold 
+        distance = np.linalg.norm(np.array([tip1[0], tip1[1], tip1[2]]) - 
+                                np.array([tip2[0], tip2[1], tip2[2]]))
+        return distance < threshold 

@@ -84,7 +84,7 @@ def main():
     hand_tracker = HandTracker()
     simulator = DroneSimulator()
     voice_processor = VoiceProcessor()
-    llm = LLMInterface("REDACTED")
+    llm = LLMInterface("AIzaSyDuy2BHUdsVdg0R_Zrj7lvHx6p7JJe7hNU")
     
     # Start with camera 0
     current_camera_index = 0
@@ -101,22 +101,19 @@ def main():
         if cap is not None:
             ret, frame = cap.read()
             if ret:
-                # Process hand gestures
                 frame, left_gesture, right_gesture = hand_tracker.detect_gestures(frame)
-                
-                # Update drone positions
                 simulator.update([left_gesture, right_gesture])
-                
-                # Display the processed frame
                 cv2.imshow('Hand Tracking', frame)
         else:
-            # If no camera, just update simulator with no gestures
             simulator.update([None, None])
         
-        # Render simulation regardless of camera status
-        simulator.render()
-        
-        # Check for keyboard input
+        # Process GLUT events and render
+        try:
+            simulator.render()
+        except Exception as e:
+            print(f"Render error: {e}")
+            break
+            
         key = cv2.waitKey(1) & 0xFF
         
         # Camera switching controls

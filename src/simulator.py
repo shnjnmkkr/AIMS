@@ -1,47 +1,154 @@
-import pygame
 import numpy as np
+from OpenGL.GL import *
+from OpenGL.GLU import *
+import pygame
+from pygame.locals import *
 
 class DroneSimulator:
     def __init__(self, width=1000, height=600):
-        pygame.init()
         self.width = width
         self.height = height
-        self.screen = pygame.display.set_mode((width, height))
-        pygame.display.set_caption("Drone Simulator")
         
-        # Initialize two drones with position, velocity, and acceleration
+        # Initialize Pygame
+        pygame.init()
+        pygame.display.set_mode((width, height), DOUBLEBUF | OPENGL)
+        pygame.display.set_caption("3D Drone Simulator")
+        
+        # Enable 3D rendering
+        glEnable(GL_DEPTH_TEST)
+        glEnable(GL_LIGHTING)
+        glEnable(GL_LIGHT0)
+        glEnable(GL_COLOR_MATERIAL)
+        
+        # Set up lighting
+        glLightfv(GL_LIGHT0, GL_POSITION, [1, 1, 1, 0])
+        glLightfv(GL_LIGHT0, GL_AMBIENT, [0.2, 0.2, 0.2, 1.0])
+        glLightfv(GL_LIGHT0, GL_DIFFUSE, [0.8, 0.8, 0.8, 1.0])
+        
+        # Set up the camera
+        self._setup_camera()
+        
+        # Initialize drones
         self.drones = [
             {
-                'pos': np.array([width/3, height/2, 0], dtype=float),
-                'vel': np.array([0., 0., 0.]),
-                'acc': np.array([0., 0., 0.]),
-                'color': (255, 0, 0)  # Red for drone 1
+                'pos': np.array([-2.0, 0.0, -10.0], dtype=float),
+                'rot': np.array([0., 0., 0.]),
+                'color': (1.0, 0.0, 0.0)  # Red for drone 1
             },
             {
-                'pos': np.array([2*width/3, height/2, 0], dtype=float),
-                'vel': np.array([0., 0., 0.]),
-                'acc': np.array([0., 0., 0.]),
-                'color': (0, 0, 255)  # Blue for drone 2
+                'pos': np.array([2.0, 0.0, -10.0], dtype=float),
+                'rot': np.array([0., 0., 0.]),
+                'color': (0.0, 0.0, 1.0)  # Blue for drone 2
             }
         ]
         
-        # Increase base speed for more pronounced movements
-        self.speed = 20.0  # Increased from 5.0
+        self.speed = 0.1
+        self.gesture_speed = 0.15
+        self.circle_radius = 1.0
+        self.circle_speed = 0.05
+        self.circle_angles = [0.0, 0.0]
+
+    def _setup_camera(self):
+        glMatrixMode(GL_PROJECTION)
+        glLoadIdentity()
+        gluPerspective(45, (self.width/self.height), 0.1, 50.0)
+        glMatrixMode(GL_MODELVIEW)
+
+    def render(self):
+        """Render the scene"""
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+        glLoadIdentity()
         
-        # Add movement amplification for yes/no gestures
-        self.gesture_speed = 30.0  # Even faster for yes/no gestures
+        # Draw grid for reference
+        glPushMatrix()
+        glColor3f(0.5, 0.5, 0.5)
+        glBegin(GL_LINES)
+        for i in range(-5, 6):
+            glVertex3f(i, -3, -15)
+            glVertex3f(i, -3, -5)
+            glVertex3f(-5, -3, i-10)
+            glVertex3f(5, -3, i-10)
+        glEnd()
+        glPopMatrix()
         
-        # Add circle animation parameters
-        self.circle_radius = 50.0
-        self.circle_speed = 0.1
-        self.circle_angles = [0.0, 0.0]  # One for each drone
-    
+        # Draw drones
+        for drone in self.drones:
+            self.draw_drone(drone)
+        
+        pygame.display.flip()
+
+    def draw_drone(self, drone):
+        glPushMatrix()
+        glTranslatef(*drone['pos'])
+        glRotatef(drone['rot'][0], 1, 0, 0)  # Pitch
+        glRotatef(drone['rot'][1], 0, 1, 0)  # Yaw
+        glRotatef(drone['rot'][2], 0, 0, 1)  # Roll
+        
+        # Set drone color
+        glColor3f(*drone['color'])
+        
+        # Draw drone body (center cube)
+        glPushMatrix()
+        glScalef(0.2, 0.2, 0.2)
+        self._draw_cube()
+        glPopMatrix()
+        
+        # Draw drone arms
+        for angle in range(0, 360, 90):
+            glPushMatrix()
+            glRotatef(angle, 0, 1, 0)
+            
+            # Draw arm
+            glPushMatrix()
+            glTranslatef(0.4, 0, 0)
+            glScalef(0.8, 0.05, 0.05)  # Make it long and thin
+            self._draw_cube()
+            glPopMatrix()
+            
+            # Draw propeller hub
+            glPushMatrix()
+            glTranslatef(0.8, 0, 0)
+            glScalef(0.1, 0.1, 0.1)
+            self._draw_cube()
+            glPopMatrix()
+            
+            # Draw propeller blades
+            for blade in range(2):
+                glPushMatrix()
+                glTranslatef(0.8, 0, 0)
+                glRotatef(blade * 180, 0, 1, 0)
+                glTranslatef(0.2, 0, 0)
+                glScalef(0.4, 0.02, 0.1)
+                self._draw_cube()
+                glPopMatrix()
+            
+            glPopMatrix()
+        
+        glPopMatrix()
+
+    def _draw_cube(self):
+        """Draw a simple cube using GL_QUADS"""
+        vertices = [
+            [1, -1, -1], [1, 1, -1], [-1, 1, -1], [-1, -1, -1],  # Front
+            [1, -1, 1], [1, 1, 1], [-1, -1, 1], [-1, 1, 1]       # Back
+        ]
+        
+        surfaces = [
+            [0, 1, 2, 3],  # Front
+            [3, 2, 7, 6],  # Left
+            [6, 7, 5, 4],  # Back
+            [4, 5, 1, 0],  # Right
+            [1, 5, 7, 2],  # Top
+            [4, 0, 3, 6]   # Bottom
+        ]
+        
+        glBegin(GL_QUADS)
+        for surface in surfaces:
+            for vertex in surface:
+                glVertex3fv(vertices[vertex])
+        glEnd()
+
     def update(self, commands):
-        """
-        Update drone positions based on commands
-        commands: list of two commands, one for each drone
-        """
-        speed = self.speed
         for i, command in enumerate(commands):
             if command is None:
                 continue
@@ -50,46 +157,33 @@ class DroneSimulator:
                 # Update circle angle
                 self.circle_angles[i] += self.circle_speed
                 
-                # Calculate new position on circle
-                center_x = self.drones[i]['pos'][0]
-                center_y = self.drones[i]['pos'][1]
+                # Calculate new position in XZ plane
+                base_x = -2.0 if i == 0 else 2.0
+                self.drones[i]['pos'][0] = base_x + self.circle_radius * np.cos(self.circle_angles[i])
+                self.drones[i]['pos'][2] = -10.0 + self.circle_radius * np.sin(self.circle_angles[i])
                 
-                self.drones[i]['pos'][0] = center_x + self.circle_radius * np.cos(self.circle_angles[i])
-                self.drones[i]['pos'][1] = center_y + self.circle_radius * np.sin(self.circle_angles[i])
+                # Add rotation for visual effect
+                self.drones[i]['rot'][1] = np.degrees(self.circle_angles[i])  # Rotate around Y axis
             else:
                 if command == "UP":
-                    self.drones[i]['pos'][1] -= speed
+                    self.drones[i]['pos'][1] += self.speed
                 elif command == "DOWN":
-                    self.drones[i]['pos'][1] += speed
+                    self.drones[i]['pos'][1] -= self.speed
                 elif command == "LEFT":
-                    self.drones[i]['pos'][0] -= speed
+                    self.drones[i]['pos'][0] -= self.speed
                 elif command == "RIGHT":
-                    self.drones[i]['pos'][0] += speed
+                    self.drones[i]['pos'][0] += self.speed
                 elif command == "FORWARD":
-                    self.drones[i]['pos'][2] += speed
+                    self.drones[i]['pos'][2] += self.speed
                 elif command == "BACKWARD":
-                    self.drones[i]['pos'][2] -= speed
+                    self.drones[i]['pos'][2] -= self.speed
                 
+                # Reset rotation when not circling
+                self.drones[i]['rot'] = np.array([0., 0., 0.])
+            
             # Keep drones within bounds
             self.drones[i]['pos'] = np.clip(
                 self.drones[i]['pos'],
-                [self.circle_radius, self.circle_radius, -100],
-                [self.width - self.circle_radius, self.height - self.circle_radius, 100]
-            )
-    
-    def render(self):
-        self.screen.fill((255, 255, 255))  # White background
-        
-        for drone in self.drones:
-            # Calculate size based on Z position (perspective effect)
-            size = max(5, min(30, 20 + drone['pos'][2] / 10))
-            
-            # Draw drone
-            pygame.draw.circle(
-                self.screen,
-                drone['color'],
-                (int(drone['pos'][0]), int(drone['pos'][1])),
-                int(size)
-            )
-        
-        pygame.display.flip() 
+                [-5.0, -3.0, -15.0],
+                [5.0, 3.0, -5.0]
+            ) 
